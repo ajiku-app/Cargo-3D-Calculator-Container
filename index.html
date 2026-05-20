@@ -152,7 +152,7 @@
   <script>
     // SAKLAR DEPLOYMENT: Ubah IS_PREVIEW ke false saat dipasang ke Blogger asli yang terhubung ke GAS
     const IS_PREVIEW = false;
-    const GAS_URL = "https://script.google.com/macros/s/AKfycbx9CWhUgRe6WVzsg1gDpTbX2Cs629PcHsreUF5ZzLrm_yE91tR3110duz9aCt-McflBUw/exec";
+    const GAS_URL = "https://script.google.com/macros/s/AKfycbxNlqK4zwNN0xvB7zws9WdF2Latk0w9aJoGoUdajB92VFEae37-l1pAArMnzxOX-ZKuLw/exec"; // Masukkan URL Deploy GAS Anda di sini
   </script>
 
   <!-- LOADING OVERLAY DENGAN PROGRESS BAR -->
@@ -1501,6 +1501,32 @@
       }
     }
 
+    // --- FUNGSI TAMENK BARU: VALIDASI IZIN DATABASE CLOUD YANG AMAN ---
+    function hasPermission(user, menuId) {
+      if (!user) return false;
+      if (user.role === 'Admin') return true;
+      if (!user.allowedMenus) return false;
+      
+      let menus = user.allowedMenus;
+      if (typeof menus === 'string') {
+        try {
+          const parsed = JSON.parse(menus);
+          if (Array.isArray(parsed)) {
+            menus = parsed;
+          } else {
+            menus = menus.split(',').map(s => s.trim());
+          }
+        } catch (e) {
+          menus = menus.split(',').map(s => s.trim());
+        }
+      }
+      if (Array.isArray(menus)) {
+        return menus.includes(menuId);
+      }
+      return false;
+    }
+
+    // --- PERBAIKAN UTAMA: SISTEM KONEKSI CLOUD LOG MASUK AMAN CORS & REDIREKSI ---
     function handleLoginSubmit() {
       const user = document.getElementById('loginUser').value.trim();
       const pass = document.getElementById('loginPass').value;
@@ -1521,21 +1547,42 @@
           showToast("Username atau password salah!", "danger");
         }
       } else {
-        fetch(`${GAS_URL}?action=login&username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`)
-          .then(res => res.json())
+        // Melakukan validasi proteksi placeholder URL
+        if (GAS_URL.includes("AKfycbyI8u_b7eD0bK7QY4E08Lgho0q4Z6qC626qE-GAS-URL-ANDA")) {
+          setLoader(false);
+          showToast("Koneksi gagal: Anda belum mengganti URL GAS_URL di baris 63 dengan URL Web App Anda sendiri!", "danger");
+          return;
+        }
+
+        // Untuk login, gunakan GET yang bersih, tambahkan timestamp pencegah cache browser
+        const targetUrl = `${GAS_URL}?action=login&username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}&_t=${Date.now()}`;
+        
+        fetch(targetUrl, {
+          method: 'GET',
+          redirect: 'follow'
+        })
+          .then(res => {
+            if (!res.ok) throw new Error("Server HTTP mengembalikan status " + res.status);
+            return res.json();
+          })
           .then(data => {
             if (data.status === "success") {
               completeLogin(data.user);
             } else {
               setLoader(false);
-              showToast(data.message || "Gagal login.", "danger");
+              showToast(data.message || "Gagal login. Periksa kredensial kembali.", "danger");
             }
           })
           .catch(err => {
+            console.error("Kesalahan jaringan login:", err);
             setLoader(false);
-            showToast("Gagal berkomunikasi dengan server GAS. Menggunakan mode Preview.", "warning");
+            showToast("Gagal berkomunikasi dengan server GAS. Sistem dialihkan ke mode demo.", "warning");
+            
+            // Fallback ke login lokal jika koneksi server mati/gagal
             const match = DB_USERS.find(u => u.username.toLowerCase() === user.toLowerCase() && u.password === pass);
-            if (match) completeLogin(match);
+            if (match) {
+              completeLogin(match);
+            }
           });
       }
     }
@@ -1586,7 +1633,7 @@
           }
           
           if (!isUserAdmin) {
-            const userAllowed = userObj.allowedMenus && userObj.allowedMenus.includes(key);
+            const userAllowed = hasPermission(userObj, key);
             if (!userAllowed) {
               btn.classList.add('opacity-40', 'cursor-not-allowed');
               btn.removeAttribute('onclick');
@@ -1606,7 +1653,7 @@
 
     function switchMenu(menuId) {
       if (CURRENT_USER && CURRENT_USER.role !== 'Admin') {
-        const isAllowed = CURRENT_USER.allowedMenus && CURRENT_USER.allowedMenus.includes(menuId);
+        const isAllowed = hasPermission(CURRENT_USER, menuId);
         if (menuId !== 'dashboard' && !isAllowed) {
           showToast("Akses Ditolak: Anda tidak memiliki izin untuk membuka menu ini.", "danger");
           return;
@@ -1627,12 +1674,12 @@
         } else {
           if (el) el.classList.add('hidden');
           if (btn) {
-            const isMenuAllowed = CURRENT_USER && (CURRENT_USER.role === "Admin" || (CURRENT_USER.allowedMenus && CURRENT_USER.allowedMenus.includes(sec)));
+            const isMenuAllowed = CURRENT_USER && (CURRENT_USER.role === "Admin" || hasPermission(CURRENT_USER, sec));
             const disabledClass = !isMenuAllowed && sec !== 'users' ? 'opacity-40 cursor-not-allowed' : '';
             btn.className = `flex items-center gap-3 px-4 py-3 rounded-xl transition text-sm font-medium text-slate-400 hover:bg-slate-800 hover:text-white ${disabledClass}`;
           }
           if (mobBtn) {
-            const isMenuAllowed = CURRENT_USER && (CURRENT_USER.role === "Admin" || (CURRENT_USER.allowedMenus && CURRENT_USER.allowedMenus.includes(sec)));
+            const isMenuAllowed = CURRENT_USER && (CURRENT_USER.role === "Admin" || hasPermission(CURRENT_USER, sec));
             const disabledClass = !isMenuAllowed && sec !== 'users' ? 'opacity-40 cursor-not-allowed' : '';
             mobBtn.className = `flex items-center gap-3 px-4 py-2.5 rounded-xl transition text-xs font-bold text-slate-400 hover:bg-slate-800 hover:text-white ${disabledClass}`;
           }
@@ -1661,12 +1708,25 @@
       document.getElementById('mainPageTitle').innerText = title;
     }
 
+    // --- PERBAIKAN SINKRONISASI AWAN: CETAK DETAIL DIAGNOSTIK KE TOAST JIKA TIMEOUT / ERROR ---
     function fetchServerData() {
       if (IS_PREVIEW) return;
+      
+      if (GAS_URL.includes("AKfycbyI8u_b7eD0bK7QY4E08Lgho0q4Z6qC626qE-GAS-URL-ANDA")) {
+        showToast("Sinkronisasi gagal: Isikan URL GAS Anda terlebih dahulu di baris 63!", "danger");
+        return;
+      }
+
       setLoader(true, "Menyinkronkan Basis Data Cloud...");
 
-      fetch(`${GAS_URL}?action=getAllData`)
-        .then(res => res.json())
+      fetch(`${GAS_URL}?action=getAllData&_t=${Date.now()}`, {
+        method: 'GET',
+        redirect: 'follow'
+      })
+        .then(res => {
+          if (!res.ok) throw new Error("HTTP Status " + res.status);
+          return res.json();
+        })
         .then(data => {
           setLoader(false);
           if (data.status === "success" || data.users) {
@@ -1679,20 +1739,43 @@
           }
         })
         .catch(err => {
+          console.error("Kesalahan sinkronisasi data cloud:", err);
           setLoader(false);
-          showToast("Gagal sinkron cloud. Menggunakan data lokal (Preview).", "warning");
+          showToast("Gagal sinkron cloud. Silakan periksa deployment GAS dan izin hak akses ('Anyone').", "warning");
           refreshAllTablesAndIndicators();
         });
     }
 
+    // --- PERBAIKAN POST PAYLOAD: KIRIM PARAMETER ACTION DI DALAM BODY SEBAGAI PLAIN TEXT ---
+    // Cara ini 100% menghapus error CORS Preflight (OPTIONS Request) pada Google Apps Script
     function callServerAPI(action, payload, callback) {
       setLoader(true, "Menghubungi Cloud Server...");
+
+      if (GAS_URL.includes("AKfycbyI8u_b7eD0bK7QY4E08Lgho0q4Z6qC626qE-GAS-URL-ANDA")) {
+        setLoader(false);
+        showToast("Gagal: URL Google Apps Script Anda belum diisi!", "danger");
+        return;
+      }
+
+      // Gabungkan data muatan dengan string instruksi action pelat peladen
+      const safePayload = {
+        action: action,
+        ...payload
+      };
+
       fetch(`${GAS_URL}?action=${action}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/plain' },
-        body: JSON.stringify(payload)
+        // Menggunakan text/plain adalah SATU-SATUNYA cara aman melewati pembatasan CORS OPTIONS di GAS
+        headers: { 
+          'Content-Type': 'text/plain;charset=utf-8' 
+        },
+        redirect: 'follow',
+        body: JSON.stringify(safePayload)
       })
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error("Peladen mengembalikan status HTTP " + res.status);
+        return res.json();
+      })
       .then(response => {
         setLoader(false);
         if (response.status === "success") {
@@ -1702,8 +1785,9 @@
         }
       })
       .catch(err => {
+        console.error("Kegagalan API POST GAS:", err);
         setLoader(false);
-        showToast("Gagal mengirim perintah ke awan: " + err.toString(), "danger");
+        showToast("Error Koneksi Cloud: Pastikan setelan Deploy Anda adalah 'Anyone' dan simpan perubahan.", "danger");
       });
     }
 
@@ -1740,15 +1824,20 @@
       }
 
       DB_CARGO_MASTER.forEach(item => {
-        const vol = (item.panjang_cm * item.lebar_cm * item.tinggi_cm) / 1000000;
+        const length = parseFloat(item.panjang_cm) || 0;
+        const width = parseFloat(item.lebar_cm) || 0;
+        const height = parseFloat(item.tinggi_cm) || 0;
+        const weight = parseFloat(item.berat_kg) || 0;
+        
+        const vol = (length * width * height) / 1000000;
         const tr = document.createElement('tr');
         tr.className = "hover:bg-slate-50 transition border-b border-slate-100";
         tr.innerHTML = `
           <td class="py-3 px-4 font-bold text-slate-800">${escapeHTML(item.nama_barang)}</td>
-          <td class="py-3 px-4 text-center">${item.panjang_cm}</td>
-          <td class="py-3 px-4 text-center">${item.lebar_cm}</td>
-          <td class="py-3 px-4 text-center">${item.tinggi_cm}</td>
-          <td class="py-3 px-4 text-center">${item.berat_kg}</td>
+          <td class="py-3 px-4 text-center">${length}</td>
+          <td class="py-3 px-4 text-center">${width}</td>
+          <td class="py-3 px-4 text-center">${height}</td>
+          <td class="py-3 px-4 text-center">${weight}</td>
           <td class="py-3 px-4 text-center font-semibold text-brand-600">${vol.toFixed(4)}</td>
           <td class="py-3 px-4 text-right space-x-1.5 shrink-0">
             <button onclick="openMasterCargoModal('${item.id}')" class="text-blue-500 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 p-1.5 rounded-lg transition"><i class="fa-solid fa-pen-to-square"></i></button>
@@ -1879,7 +1968,23 @@
         const isSelf = CURRENT_USER && CURRENT_USER.id === user.id;
         const tr = document.createElement('tr');
         tr.className = "hover:bg-slate-50 transition border-b border-slate-100";
-        const permsLabel = user.role === 'Admin' ? 'Semua Akses' : (user.allowedMenus ? user.allowedMenus.join(', '): 'Tidak ada akses');
+        
+        // --- PROSES DESENTRALISASI LOGIKA JOIN UNTUK CLOUD COMPATIBILITY ---
+        let permsLabel = 'Tidak ada akses';
+        if (user.role === 'Admin') {
+          permsLabel = 'Semua Akses';
+        } else if (user.allowedMenus) {
+          if (Array.isArray(user.allowedMenus)) {
+            permsLabel = user.allowedMenus.join(', ');
+          } else if (typeof user.allowedMenus === 'string') {
+            try {
+              const parsed = JSON.parse(user.allowedMenus);
+              permsLabel = Array.isArray(parsed) ? parsed.join(', ') : user.allowedMenus;
+            } catch (e) {
+              permsLabel = user.allowedMenus; // fallback string biasa dipisah koma
+            }
+          }
+        }
 
         tr.innerHTML = `
           <td class="py-3 px-4 font-bold text-slate-800">
@@ -1919,12 +2024,26 @@
           document.getElementById('userRole').value = u.role;
           
           togglePermissionsArea(u.role);
+          
+          // --- PENYELARASAN PROPERTI ALLOWED MENUS SAAT MEMBUKA MODAL EDIT ---
           const menus = u.allowedMenus || [];
-          document.getElementById('perm_calculator').checked = menus.includes('calculator');
-          document.getElementById('perm_report').checked = menus.includes('report');
-          document.getElementById('perm_master').checked = menus.includes('master');
-          document.getElementById('perm_history').checked = menus.includes('history');
-          document.getElementById('perm_settings').checked = menus.includes('settings');
+          let menusArray = [];
+          if (Array.isArray(menus)) {
+            menusArray = menus;
+          } else if (typeof menus === 'string') {
+            try {
+              const parsed = JSON.parse(menus);
+              menusArray = Array.isArray(parsed) ? parsed : menus.split(',').map(s => s.trim());
+            } catch (e) {
+              menusArray = menus.split(',').map(s => s.trim());
+            }
+          }
+
+          document.getElementById('perm_calculator').checked = menusArray.includes('calculator');
+          document.getElementById('perm_report').checked = menusArray.includes('report');
+          document.getElementById('perm_master').checked = menusArray.includes('master');
+          document.getElementById('perm_history').checked = menusArray.includes('history');
+          document.getElementById('perm_settings').checked = menusArray.includes('settings');
         }
       } else {
         document.getElementById('userModalTitle').innerText = "Tambah Akun Pengguna Baru";
@@ -2059,10 +2178,10 @@
           SELECTED_CARGO_ITEMS.push({
             id: master.id,
             nama_barang: master.nama_barang,
-            panjang_cm: master.panjang_cm,
-            lebar_cm: master.lebar_cm,
-            tinggi_cm: master.tinggi_cm,
-            berat_kg: master.berat_kg,
+            panjang_cm: parseFloat(master.panjang_cm),
+            lebar_cm: parseFloat(master.lebar_cm),
+            tinggi_cm: parseFloat(master.tinggi_cm),
+            berat_kg: parseFloat(master.berat_kg),
             qty: qty
           });
         }
