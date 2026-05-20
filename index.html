@@ -1879,7 +1879,21 @@
         const isSelf = CURRENT_USER && CURRENT_USER.id === user.id;
         const tr = document.createElement('tr');
         tr.className = "hover:bg-slate-50 transition border-b border-slate-100";
-        const permsLabel = user.role === 'Admin' ? 'Semua Akses' : (user.allowedMenus ? user.allowedMenus.join(', ') : 'Tidak ada akses');
+        const permsLabel = user.role === 'Admin' ? 'Semua Akses' : (user.allowedMenus ? let displayMenus = '-';
+if (user.allowedMenus) {
+  if (Array.isArray(user.allowedMenus)) {
+    displayMenus = user.allowedMenus.join(', ');
+  } else if (typeof user.allowedMenus === 'string') {
+    try {
+      // Jika data tersimpan sebagai JSON string seperti '["dashboard","calculator"]'
+      const parsed = JSON.parse(user.allowedMenus);
+      displayMenus = Array.isArray(parsed) ? parsed.join(', ') : user.allowedMenus;
+    } catch (e) {
+      // Jika data berupa teks biasa dipisah koma seperti "dashboard, calculator"
+      displayMenus = user.allowedMenus;
+    }
+  }
+} : 'Tidak ada akses');
 
         tr.innerHTML = `
           <td class="py-3 px-4 font-bold text-slate-800">
